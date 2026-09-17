@@ -1,0 +1,33 @@
+model_list:
+  - model_name: default
+    litellm_params:
+      model: openai/${AISTACK_DEFAULT_MODEL}
+      api_base: ${AISTACK_API_BASE}
+      api_key: ${AISTACK_API_KEY}
+  - model_name: code
+    litellm_params:
+      model: openai/${AISTACK_CODE_MODEL}
+      api_base: ${AISTACK_API_BASE}
+      api_key: ${AISTACK_API_KEY}
+  - model_name: translate
+    litellm_params:
+      model: openai/${AISTACK_TRANSLATE_MODEL}
+      api_base: ${AISTACK_API_BASE}
+      api_key: ${AISTACK_API_KEY}
+  - model_name: fast
+    litellm_params:
+      model: openai/${AISTACK_FAST_MODEL}
+      api_base: ${AISTACK_API_BASE}
+      api_key: ${AISTACK_API_KEY}
+  - model_name: offensive
+    litellm_params:
+      model: openai/${AISTACK_OFFENSIVE_MODEL}
+      api_base: ${AISTACK_API_BASE}
+      api_key: ${AISTACK_API_KEY}
+  - model_name: embed
+    model_info:
+      mode: embedding
+    litellm_params:
+      model: openai/${AISTACK_EMBED_MODEL}
+      api_base: ${AISTACK_API_BASE}
+      api_key: ${AISTACK_API_KEY}

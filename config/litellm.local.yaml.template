@@ -1,0 +1,63 @@
+model_list:
+  - model_name: default
+    model_info:
+      supports_function_calling: false
+      supports_parallel_function_calling: false
+      supports_pdf_input: false
+      supports_response_schema: false
+      supports_tool_choice: false
+    litellm_params:
+      model: openai/${AISTACK_DEFAULT_MODEL}
+      api_base: http://ollama:11434/v1
+      api_key: not-needed-for-local-ollama
+  - model_name: code
+    model_info:
+      supports_function_calling: false
+      supports_parallel_function_calling: false
+      supports_pdf_input: false
+      supports_response_schema: false
+      supports_tool_choice: false
+    litellm_params:
+      model: openai/${AISTACK_CODE_MODEL}
+      api_base: http://ollama:11434/v1
+      api_key: not-needed-for-local-ollama
+  - model_name: translate
+    model_info:
+      supports_function_calling: false
+      supports_parallel_function_calling: false
+      supports_pdf_input: false
+      supports_response_schema: false
+      supports_tool_choice: false
+    litellm_params:
+      model: openai/${AISTACK_TRANSLATE_MODEL}
+      api_base: http://ollama:11434/v1
+      api_key: not-needed-for-local-ollama
+  - model_name: fast
+    model_info:
+      supports_function_calling: false
+      supports_parallel_function_calling: false
+      supports_pdf_input: false
+      supports_response_schema: false
+      supports_tool_choice: false
+    litellm_params:
+      model: openai/${AISTACK_FAST_MODEL}
+      api_base: http://ollama:11434/v1
+      api_key: not-needed-for-local-ollama
+  - model_name: offensive
+    model_info:
+      supports_function_calling: false
+      supports_parallel_function_calling: false
+      supports_pdf_input: false
+      supports_response_schema: false
+      supports_tool_choice: false
+    litellm_params:
+      model: openai/${AISTACK_OFFENSIVE_MODEL}
+      api_base: http://ollama:11434/v1
+      api_key: not-needed-for-local-ollama
+  - model_name: embed
+    model_info:
+      mode: embedding
+    litellm_params:
+      model: openai/${AISTACK_EMBED_MODEL}
+      api_base: http://ollama:11434/v1
+      api_key: not-needed-for-local-ollama

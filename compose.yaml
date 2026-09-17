@@ -1,0 +1,71 @@
+name: aistack
+
+services:
+  litellm:
+    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:main-latest}
+    container_name: aistack-litellm
+    restart: unless-stopped
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--detailed_debug"]
+    ports:
+      - "127.0.0.1:${LITELLM_PORT:-1337}:4000"
+    volumes:
+      - ${LITELLM_CONFIG:?Set LITELLM_CONFIG to a rendered LiteLLM config}:/app/config.yaml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:4000/health/liveliness\")'"]
+      interval: 20s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks:
+      - aistack
+
+  ollama:
+    image: ${OLLAMA_IMAGE:-docker.io/ollama/ollama:latest}
+    container_name: aistack-ollama
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${OLLAMA_PORT:-1338}:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    devices:
+      - ${OLLAMA_GPU_DEVICE:-/dev/null:/dev/null}
+    networks:
+      - aistack
+
+  open-webui:
+    image: ${OPEN_WEBUI_IMAGE:-ghcr.io/open-webui/open-webui:main}
+    container_name: aistack-open-webui
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${OPEN_WEBUI_PORT:-1339}:8080"
+    environment:
+      ENABLE_OLLAMA_API: "false"
+      ENABLE_DIRECT_CONNECTIONS: "false"
+      ENABLE_MEMORIES: "false"
+      ENABLE_MEMORY_SYSTEM_CONTEXT: "false"
+      ENABLE_MEMORY_BACKGROUND_REVIEW: "false"
+      ENABLE_WEB_SEARCH: "false"
+      ENABLE_SEARCH_QUERY_GENERATION: "false"
+      ENABLE_CODE_EXECUTION: "false"
+      ENABLE_CODE_INTERPRETER: "false"
+      ENABLE_EVALUATION_ARENA_MODELS: "false"
+      ENABLE_VERSION_UPDATE_CHECK: "false"
+      ENABLE_USER_WEBHOOKS: "false"
+      DEFAULT_MODEL_METADATA: '{"capabilities":{"vision":false,"file_upload":false,"web_search":false,"image_generation":false,"code_interpreter":false,"citations":false,"usage":false,"builtin_tools":false}}'
+      OPENAI_API_BASE_URL: http://litellm:4000/v1
+      OPENAI_API_KEY: not-needed-for-loopback-litellm
+      WEBUI_AUTH: "false"
+    volumes:
+      - open-webui-data:/app/backend/data
+    depends_on:
+      litellm:
+        condition: service_healthy
+    networks:
+      - aistack
+
+networks:
+  aistack:
+
+volumes:
+  ollama-models:
+  open-webui-data:

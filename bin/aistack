@@ -1,0 +1,227 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+readonly PROJECT_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
+readonly CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}/aistack"
+readonly USER_CONFIG="$CONFIG_HOME/config.env"
+readonly RUNTIME_DIR="$PROJECT_DIR/.runtime"
+readonly COMPOSE_FILE="$PROJECT_DIR/compose.yaml"
+readonly CONTAINERS_CONF="$PROJECT_DIR/config/containers.conf"
+readonly LOCAL_TEMPLATE="$PROJECT_DIR/config/litellm.local.yaml.template"
+readonly REMOTE_TEMPLATE="$PROJECT_DIR/config/litellm.remote.yaml.template"
+
+die() { printf 'aistack: %s\n' "$*" >&2; exit 1; }
+info() { printf 'aistack: %s\n' "$*"; }
+
+compose() {
+  LITELLM_CONFIG="${LITELLM_CONFIG:-$LOCAL_TEMPLATE}"
+  export LITELLM_CONFIG
+  export CONTAINERS_CONF_OVERRIDE="${CONTAINERS_CONF_OVERRIDE:-$CONTAINERS_CONF}"
+  if podman compose version >/dev/null 2>&1; then
+    systemctl --user start podman.socket >/dev/null 2>&1 || true
+    podman compose -f "$COMPOSE_FILE" "$@"
+  elif command -v podman-compose >/dev/null 2>&1; then
+    podman-compose -f "$COMPOSE_FILE" "$@"
+  else
+    die "Podman Compose is required. Install the Podman compose provider for your distribution."
+  fi
+}
+
+podman_api() {
+  systemctl --user start podman.socket >/dev/null 2>&1 || true
+  podman --remote "$@"
+}
+
+require_podman() {
+  command -v podman >/dev/null 2>&1 || die "Podman is required but was not found in PATH."
+  podman_api info >/dev/null 2>&1 || die "Podman's rootless API socket is not usable. Run 'systemctl --user status podman.socket' to diagnose it."
+}
+
+load_user_config() {
+  [[ -f "$USER_CONFIG" ]] || die "missing $USER_CONFIG; copy $PROJECT_DIR/config/config.env.example there and set its values"
+  set -a
+  source "$USER_CONFIG"
+  set +a
+}
+
+require_remote_config() {
+  local profile="$1" variable value
+  for variable in API_BASE API_KEY DEFAULT_MODEL CODE_MODEL TRANSLATE_MODEL FAST_MODEL OFFENSIVE_MODEL EMBED_MODEL; do
+    value="${profile}_${variable}"
+    [[ -n "${!value:-}" ]] || die "missing $value in $USER_CONFIG"
+  done
+}
+
+require_local_config() {
+  local profile="$1" variable value
+  for variable in DEFAULT_MODEL CODE_MODEL TRANSLATE_MODEL FAST_MODEL OFFENSIVE_MODEL EMBED_MODEL; do
+    value="${profile}_${variable}"
+    [[ -n "${!value:-}" ]] || die "missing $value in $USER_CONFIG"
+  done
+}
+
+export_models() {
+  local profile="$1" alias_name source_name
+  for alias_name in DEFAULT CODE TRANSLATE FAST OFFENSIVE EMBED; do
+    source_name="${profile}_${alias_name}_MODEL"
+    export "AISTACK_${alias_name}_MODEL=${!source_name}"
+  done
+}
+
+render_config() {
+  local template="$1"
+  command -v envsubst >/dev/null 2>&1 || die "envsubst is required; install gettext-base (Debian/Ubuntu/Kali) or gettext."
+  mkdir -p "$RUNTIME_DIR"
+  envsubst < "$template" > "$RUNTIME_DIR/litellm.yaml"
+  chmod 600 "$RUNTIME_DIR/litellm.yaml"
+  printf '%s\n' "$RUNTIME_DIR/litellm.yaml"
+}
+
+render_remote_config() {
+  local profile="$1" variable_name
+  variable_name="${profile}_API_BASE"; export AISTACK_API_BASE="${!variable_name}"
+  variable_name="${profile}_API_KEY"; export AISTACK_API_KEY="${!variable_name}"
+  export_models "$profile"
+  render_config "$REMOTE_TEMPLATE"
+}
+
+start_litellm() {
+  local config_path="$1"
+  LITELLM_CONFIG="$config_path" compose up -d --force-recreate litellm open-webui
+}
+
+start_local() {
+  local profile="$1" config_path model
+  load_user_config
+  require_local_config "$profile"
+  export_models "$profile"
+  config_path="$(render_config "$LOCAL_TEMPLATE")"
+  info "starting ${profile,,} local inference"
+  if [[ -n "${OLLAMA_GPU_DEVICE:-}" ]]; then
+    info "using configured GPU device $OLLAMA_GPU_DEVICE"
+  else
+    info "no GPU device configured; Ollama will use CPU"
+  fi
+  compose up -d --force-recreate ollama
+  until compose exec -T ollama ollama list >/dev/null 2>&1; do sleep 1; done
+  local -a models
+  mapfile -t models < <(printf '%s\n' \
+    "$AISTACK_DEFAULT_MODEL" "$AISTACK_CODE_MODEL" "$AISTACK_TRANSLATE_MODEL" \
+    "$AISTACK_FAST_MODEL" "$AISTACK_OFFENSIVE_MODEL" "$AISTACK_EMBED_MODEL" | awk 'NF && !seen[$0]++')
+  local installed want
+  installed="$(compose exec -T ollama ollama list | awk 'NR > 1 { print $1 }')"
+  for model in "${models[@]}"; do
+    # Ollama lists an untagged pull as "<name>:latest"; match that form.
+    want="$model"; [[ "$want" == *:* ]] || want="$want:latest"
+    if ! grep -Fxq "$want" <<<"$installed"; then
+      info "pulling $model"
+      compose exec -T ollama ollama pull "$model"
+    fi
+  done
+  start_litellm "$config_path"
+}
+
+start_remote() {
+  local profile="$1"
+  load_user_config
+  require_remote_config "$profile"
+  info "switching to ${profile,,} routing"
+  compose stop ollama >/dev/null || true
+  start_litellm "$(render_remote_config "$profile")"
+}
+
+status() {
+  compose ps
+}
+
+stop() {
+  local container_ids active_ids attempt
+  if ! compose down; then
+    info "the 'rootless netns: kill network process' error above is expected; cleaning up"
+  fi
+
+  container_ids="$(podman_api ps -aq --filter label=com.docker.compose.project=aistack --filter status=exited)"
+  if [[ -n "$container_ids" ]]; then
+    podman_api rm $container_ids >/dev/null
+  fi
+
+  active_ids="$(podman_api ps -aq --filter label=com.docker.compose.project=aistack)"
+  [[ -z "$active_ids" ]] || die "one or more AI Stack containers are still running; inspect with 'podman --remote ps -a'"
+
+  # Rootless teardown can leave the project network behind while the shared netns
+  # process is still exiting; retry removal so a single stop finishes cleanly.
+  if podman_api network exists aistack_aistack >/dev/null 2>&1; then
+    for attempt in 1 2 3 4 5; do
+      podman_api network rm aistack_aistack >/dev/null 2>&1 && break
+      sleep 1
+    done
+  fi
+
+  if podman_api network exists aistack_aistack >/dev/null 2>&1; then
+    info "containers stopped, but the rootless network persists; run 'aistack stop' again shortly"
+  fi
+}
+
+reset() {
+  local target="${2:-}" volume_name
+  [[ $# -eq 2 ]] || die "usage: aistack reset {all|ollama|openwebui}"
+
+  case "$target" in
+    all)
+      stop
+      for volume_name in aistack_ollama-models aistack_open-webui-data; do
+        if podman_api volume exists "$volume_name"; then
+          podman_api volume rm "$volume_name" >/dev/null
+        fi
+      done
+      ;;
+    ollama)
+      compose rm -sf ollama >/dev/null 2>&1 || true
+      volume_name="aistack_ollama-models"
+      if podman_api volume exists "$volume_name"; then
+        podman_api volume rm "$volume_name" >/dev/null
+      fi
+      ;;
+    openwebui)
+      compose rm -sf open-webui >/dev/null 2>&1 || true
+      volume_name="aistack_open-webui-data"
+      if podman_api volume exists "$volume_name"; then
+        podman_api volume rm "$volume_name" >/dev/null
+      fi
+      ;;
+    *)
+      die "usage: aistack reset {all|ollama|openwebui}"
+      ;;
+  esac
+
+  case "$target" in
+    all) info "local AI Stack volumes removed; run 'aistack local' or 'aistack lite' to start fresh" ;;
+    ollama) info "local Ollama model cache removed; run 'aistack local' or 'aistack lite' to download models again" ;;
+    openwebui) info "local Open WebUI data removed; run 'aistack local' or 'aistack lite' to start it fresh" ;;
+  esac
+}
+
+models() {
+  compose exec -T ollama ollama list
+}
+
+main() {
+  local command="${1:-}"
+  case "$command" in
+    local) require_podman; start_local LOCAL ;;
+    lite) require_podman; start_local LITE ;;
+    lab) require_podman; start_remote LAB ;;
+    cloud) require_podman; start_remote CLOUD ;;
+    status) require_podman; status ;;
+    stop) require_podman; stop ;;
+    reset) require_podman; reset "$@" ;;
+    models) require_podman; models ;;
+    *)
+      printf 'Usage: aistack {local|lite|lab|cloud|status|stop|reset {all|ollama|openwebui}|models}\n' >&2
+      exit 2
+      ;;
+  esac
+}
+
+main "$@"
