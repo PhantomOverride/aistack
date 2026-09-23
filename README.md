@@ -47,7 +47,30 @@ On Debian-family distributions with the appropriate NVIDIA package repository en
 
 ```bash
 sudo apt update
-sudo apt install -y nvidia-driver nvidia-container-toolkit
+sudo apt install -y nvidia-driver
+
+# Reboot to load driver
+
+sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+   ca-certificates \
+   curl \
+   gnupg2
+
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg \
+  && curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+    sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+    sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+
+sudo apt-get update
+
+export NVIDIA_CONTAINER_TOOLKIT_VERSION=1.20.1-1
+sudo apt-get install -y \
+   nvidia-container-toolkit=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
+   nvidia-container-toolkit-base=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
+   libnvidia-container-tools=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
+   libnvidia-container1=${NVIDIA_CONTAINER_TOOLKIT_VERSION}
+
+# Ready!
 ```
 
 Restart after installing or updating the NVIDIA driver, then verify the host driver:
@@ -101,6 +124,7 @@ Every profile reads `~/.config/aistack/config.env`, so it must exist before runn
 ```bash
 aistack local
 aistack lite
+aistack local --insecure-pull
 aistack lab
 aistack cloud
 aistack status
@@ -112,6 +136,10 @@ aistack reset openwebui
 ```
 
 `local` starts Ollama, pulls models such as `gemma4:e4b-it-qat` once into the persistent `ollama-models` volume, and starts LiteLLM and Open WebUI. `lite` targets battery and CPU-first laptops and pulls lighter models. `lab` and `cloud` stop Ollama and route aliases to the configured OpenAI-compatible endpoint. Switching between `local` and `lite` force-recreates Ollama, LiteLLM, and Open WebUI; cached models remain in the persistent volume. The user configuration holds every profile's per-alias model IDs, the container image references, the remote endpoint URLs, and the API keys; do not commit it. Override any default loopback port in that configuration when it is already occupied.
+
+When an Ollama model registry requires redirects that its default pull client cannot follow, use `aistack local --insecure-pull` or `aistack lite --insecure-pull`. This passes `--insecure` only to model downloads performed by that command.
+
+Every local alias has an Ollama context window setting. `local` uses 16K by default and 64K for `code` and `offensive`; `lite` uses 4K by default and 32K for `code` and `offensive`. The remaining local aliases initially use their profile default. Adjust the matching `*_CONTEXT` variables in the private configuration for the available memory and model limits. The lab profile sends the same settings as `local` as Ollama-compatible request options. Cloud routing does not set them because context behavior is provider and model specific.
 
 `aistack reset all` stops the stack and removes its persistent Ollama model cache and Open WebUI data volumes. `aistack reset ollama` removes only the Ollama model cache; `aistack reset openwebui` removes only Open WebUI data. Reset does not remove images, Podman data from other projects, or `~/.config/aistack/config.env`. The next `local` or `lite` run downloads required models again.
 
@@ -171,6 +199,11 @@ podman --remote logs -f aistack-ollama
 podman --remote logs --tail 200 aistack-litellm
 podman --remote logs --tail 200 aistack-open-webui
 podman --remote logs --tail 200 aistack-ollama
+```
+
+Check loaded models and context in ollama:
+```
+podman --remote exec aistack-ollama ollama ps
 ```
 
 Use these checks to separate proxy, model, and UI problems:

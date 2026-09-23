@@ -9,6 +9,7 @@ readonly RUNTIME_DIR="$PROJECT_DIR/.runtime"
 readonly COMPOSE_FILE="$PROJECT_DIR/compose.yaml"
 readonly CONTAINERS_CONF="$PROJECT_DIR/config/containers.conf"
 readonly LOCAL_TEMPLATE="$PROJECT_DIR/config/litellm.local.yaml.template"
+readonly LAB_TEMPLATE="$PROJECT_DIR/config/litellm.lab.yaml.template"
 readonly REMOTE_TEMPLATE="$PROJECT_DIR/config/litellm.remote.yaml.template"
 
 die() { printf 'aistack: %s\n' "$*" >&2; exit 1; }
@@ -61,11 +62,27 @@ require_local_config() {
   done
 }
 
+require_context_config() {
+  local profile="$1" variable value
+  for variable in DEFAULT_CONTEXT CODE_CONTEXT TRANSLATE_CONTEXT FAST_CONTEXT OFFENSIVE_CONTEXT EMBED_CONTEXT; do
+    value="${profile}_${variable}"
+    [[ -n "${!value:-}" ]] || die "missing $value in $USER_CONFIG"
+  done
+}
+
 export_models() {
   local profile="$1" alias_name source_name
   for alias_name in DEFAULT CODE TRANSLATE FAST OFFENSIVE EMBED; do
     source_name="${profile}_${alias_name}_MODEL"
     export "AISTACK_${alias_name}_MODEL=${!source_name}"
+  done
+}
+
+export_contexts() {
+  local profile="$1" alias_name source_name
+  for alias_name in DEFAULT CODE TRANSLATE FAST OFFENSIVE EMBED; do
+    source_name="${profile}_${alias_name}_CONTEXT"
+    export "AISTACK_${alias_name}_CONTEXT=${!source_name}"
   done
 }
 
@@ -86,16 +103,27 @@ render_remote_config() {
   render_config "$REMOTE_TEMPLATE"
 }
 
+render_lab_config() {
+  local profile="$1" variable_name
+  variable_name="${profile}_API_BASE"; export AISTACK_API_BASE="${!variable_name}"
+  variable_name="${profile}_API_KEY"; export AISTACK_API_KEY="${!variable_name}"
+  export_models "$profile"
+  export_contexts "$profile"
+  render_config "$LAB_TEMPLATE"
+}
+
 start_litellm() {
   local config_path="$1"
   LITELLM_CONFIG="$config_path" compose up -d --force-recreate litellm open-webui
 }
 
 start_local() {
-  local profile="$1" config_path model
+  local profile="$1" insecure_pull="$2" config_path model
   load_user_config
   require_local_config "$profile"
+  require_context_config "$profile"
   export_models "$profile"
+  export_contexts "$profile"
   config_path="$(render_config "$LOCAL_TEMPLATE")"
   info "starting ${profile,,} local inference"
   if [[ -n "${OLLAMA_GPU_DEVICE:-}" ]]; then
@@ -116,7 +144,11 @@ start_local() {
     want="$model"; [[ "$want" == *:* ]] || want="$want:latest"
     if ! grep -Fxq "$want" <<<"$installed"; then
       info "pulling $model"
-      compose exec -T ollama ollama pull "$model"
+      if [[ "$insecure_pull" == true ]]; then
+        compose exec -T ollama ollama pull --insecure "$model"
+      else
+        compose exec -T ollama ollama pull "$model"
+      fi
     fi
   done
   start_litellm "$config_path"
@@ -128,11 +160,17 @@ start_remote() {
   require_remote_config "$profile"
   info "switching to ${profile,,} routing"
   compose stop ollama >/dev/null || true
-  start_litellm "$(render_remote_config "$profile")"
+  if [[ "$profile" == LAB ]]; then
+    require_context_config "$profile"
+    start_litellm "$(render_lab_config "$profile")"
+  else
+    start_litellm "$(render_remote_config "$profile")"
+  fi
 }
 
 status() {
   compose ps
+  podman_api exec aistack-ollama ollama ps
 }
 
 stop() {
@@ -207,10 +245,21 @@ models() {
 }
 
 main() {
-  local command="${1:-}"
+  local command="${1:-}" insecure_pull=false
   case "$command" in
-    local) require_podman; start_local LOCAL ;;
-    lite) require_podman; start_local LITE ;;
+    local|lite)
+      if [[ "${2:-}" == --insecure-pull && $# -eq 2 ]]; then
+        insecure_pull=true
+      elif [[ $# -ne 1 ]]; then
+        die "usage: aistack $command [--insecure-pull]"
+      fi
+      require_podman
+      if [[ "$command" == local ]]; then
+        start_local LOCAL "$insecure_pull"
+      else
+        start_local LITE "$insecure_pull"
+      fi
+      ;;
     lab) require_podman; start_remote LAB ;;
     cloud) require_podman; start_remote CLOUD ;;
     status) require_podman; status ;;
@@ -218,7 +267,7 @@ main() {
     reset) require_podman; reset "$@" ;;
     models) require_podman; models ;;
     *)
-      printf 'Usage: aistack {local|lite|lab|cloud|status|stop|reset {all|ollama|openwebui}|models}\n' >&2
+      printf 'Usage: aistack {local|lite} [--insecure-pull]\n       aistack {lab|cloud|status|stop|reset {all|ollama|openwebui}|models}\n' >&2
       exit 2
       ;;
   esac

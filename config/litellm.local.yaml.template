@@ -7,9 +7,12 @@ model_list:
       supports_response_schema: false
       supports_tool_choice: false
     litellm_params:
-      model: openai/${AISTACK_DEFAULT_MODEL}
-      api_base: http://ollama:11434/v1
+      model: ollama_chat/${AISTACK_DEFAULT_MODEL}
+      api_base: http://ollama:11434
       api_key: not-needed-for-local-ollama
+      extra_body:
+        options:
+          num_ctx: ${AISTACK_DEFAULT_CONTEXT}
   - model_name: code
     model_info:
       supports_function_calling: false
@@ -18,9 +21,12 @@ model_list:
       supports_response_schema: false
       supports_tool_choice: false
     litellm_params:
-      model: openai/${AISTACK_CODE_MODEL}
-      api_base: http://ollama:11434/v1
+      model: ollama_chat/${AISTACK_CODE_MODEL}
+      api_base: http://ollama:11434
       api_key: not-needed-for-local-ollama
+      extra_body:
+        options:
+          num_ctx: ${AISTACK_CODE_CONTEXT}
   - model_name: translate
     model_info:
       supports_function_calling: false
@@ -29,9 +35,12 @@ model_list:
       supports_response_schema: false
       supports_tool_choice: false
     litellm_params:
-      model: openai/${AISTACK_TRANSLATE_MODEL}
-      api_base: http://ollama:11434/v1
+      model: ollama_chat/${AISTACK_TRANSLATE_MODEL}
+      api_base: http://ollama:11434
       api_key: not-needed-for-local-ollama
+      extra_body:
+        options:
+          num_ctx: ${AISTACK_TRANSLATE_CONTEXT}
   - model_name: fast
     model_info:
       supports_function_calling: false
@@ -40,9 +49,12 @@ model_list:
       supports_response_schema: false
       supports_tool_choice: false
     litellm_params:
-      model: openai/${AISTACK_FAST_MODEL}
-      api_base: http://ollama:11434/v1
+      model: ollama_chat/${AISTACK_FAST_MODEL}
+      api_base: http://ollama:11434
       api_key: not-needed-for-local-ollama
+      extra_body:
+        options:
+          num_ctx: ${AISTACK_FAST_CONTEXT}
   - model_name: offensive
     model_info:
       supports_function_calling: false
@@ -51,9 +63,12 @@ model_list:
       supports_response_schema: false
       supports_tool_choice: false
     litellm_params:
-      model: openai/${AISTACK_OFFENSIVE_MODEL}
-      api_base: http://ollama:11434/v1
+      model: ollama_chat/${AISTACK_OFFENSIVE_MODEL}
+      api_base: http://ollama:11434
       api_key: not-needed-for-local-ollama
+      extra_body:
+        options:
+          num_ctx: ${AISTACK_OFFENSIVE_CONTEXT}
   - model_name: embed
     model_info:
       mode: embedding
@@ -61,3 +76,6 @@ model_list:
       model: openai/${AISTACK_EMBED_MODEL}
       api_base: http://ollama:11434/v1
       api_key: not-needed-for-local-ollama
+      extra_body:
+        options:
+          num_ctx: ${AISTACK_EMBED_CONTEXT}
