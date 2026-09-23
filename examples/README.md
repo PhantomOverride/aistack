@@ -46,6 +46,34 @@ Chat responses stream to the terminal. The next prompt appears only after the as
 
 `chat.py` defaults to an 8,192-token context window and reserves 2,048 tokens for each model response. It estimates tokens as $\lceil\text{characters}/4\rceil$, so counts are portable across local and remote routed models but not tokenizer-exact. Before each request, it removes the oldest complete user/assistant exchanges until the estimated input plus the output reserve fit the context limit. The current prompt is never removed.
 
+## Zsh Command Assist
+
+Source the widget from `.zshrc` after ZLE is available:
+
+```zsh
+source /path/to/aistack/examples/aistack-command-assist.zsh
+```
+
+When the current command line contains `#`, Tab sends the complete line to the `default` LiteLLM alias and replaces the editing buffer with the generated command. For example, enter:
+
+```zsh
+nmap 10.0.0.0/8 #pingsweep please
+```
+
+The widget displays a waiting indicator while it generates the command. The generated command is displayed but not run. Inspect or edit it, then press Enter to execute it normally. On request failure, the indicator shows the API error and the original line remains in the buffer. Lines without `#` retain Zsh's normal Tab completion behavior. The widget uses `curl` and `jq`, and supports the `AISTACK_API_BASE`, `AISTACK_MODEL`, `AISTACK_API_KEY`, and `AISTACK_AI_TIMEOUT` environment variables.
+
+## Zsh AI Autocomplete
+
+Run the tmux launcher when you want complete commands suggested while typing:
+
+```zsh
+zsh ~/aistack/examples/aistack-ai-shell.zsh
+```
+
+After a short pause, a dim inline complete-command suggestion appears when the `default` model returns a prediction, followed by a `[Tab]` hint. Tab replaces the current command line with that suggestion; without a visible suggestion, Tab keeps its existing completion behavior. The model can return no suggestion when it is uncertain. Requests are asynchronous, stale replies are ignored as you continue typing, and they request `think: false` with a 48-token output limit. This example does not use `#`; use it separately from the command-assist widget because both own Tab.
+
+The launcher starts a named tmux session using the normal interactive Zsh configuration and enables the widget there. The model receives the current line, up to 20 recent shell-history entries (capped at approximately 1 KiB), and the final approximately 1 KiB of the current tmux pane's scrollback. This includes visible terminal output, such as `ls` results. Scrollback can contain sensitive information, so do not use this example with sensitive terminal sessions. `AISTACK_AI_AUTOCOMPLETE_DELAY` controls the idle delay in seconds (default `1`), `AISTACK_AI_TIMEOUT` controls the request timeout (default `20`), and `AISTACK_AI_TMUX_SESSION` changes the default `aistack-ai` session name.
+
 ## Configuration
 
 All examples use these defaults, which environment variables can override:
